@@ -1,18 +1,6 @@
 require("dotenv").config();
 
 const express = require("express");
-const app = express();
-
-const PORT = process.env.PORT || 3000;
-
-app.get("/", (req, res) => {
-  res.send("🎵 Music Bot is Running!");
-});
-
-app.listen(PORT, "0.0.0.0", () => {
-  console.log(`🌐 Web server started on port ${PORT}`);
-});
-
 const fs = require("fs");
 const path = require("path");
 
@@ -23,6 +11,24 @@ const {
   Events
 } = require("discord.js");
 
+const { Connectors } = require("shoukaku");
+const { Kazagumo } = require("kazagumo");
+
+// ================= WEB SERVER =================
+
+const app = express();
+const PORT = process.env.PORT || 3000;
+
+app.get("/", (req, res) => {
+  res.send("🎵 Music Bot is Running!");
+});
+
+app.listen(PORT, "0.0.0.0", () => {
+  console.log(`🌐 Web server started on port ${PORT}`);
+});
+
+// ================= DISCORD CLIENT =================
+
 const client = new Client({
   intents: [
     GatewayIntentBits.Guilds,
@@ -31,6 +37,83 @@ const client = new Client({
     GatewayIntentBits.MessageContent
   ]
 });
+
+// ================= KAZAGUMO / LAVALINK =================
+
+const Nodes = [
+  {
+    name: "Render-Lavalink",
+
+    // Render ka HTTPS hostname
+    url: process.env.LAVALINK_HOST,
+
+    // Lavalink password
+    auth: process.env.LAVALINK_PASSWORD,
+
+    // Render HTTPS/WSS use karta hai
+    secure: true
+  }
+];
+
+const kazagumo = new Kazagumo(
+  {
+    defaultSearchEngine: "youtube",
+
+    send: (guildId, payload) => {
+      const guild = client.guilds.cache.get(guildId);
+
+      if (guild) {
+        guild.shard.send(payload);
+      }
+    }
+  },
+
+  new Connectors.DiscordJS(client),
+
+  Nodes
+);
+
+// Lavalink events
+
+kazagumo.shoukaku.on("ready", (name) => {
+  console.log(`✅ Lavalink connected: ${name}`);
+});
+
+kazagumo.shoukaku.on("error", (name, error) => {
+  console.error(`❌ Lavalink error [${name}]:`, error);
+});
+
+kazagumo.shoukaku.on("close", (name, code, reason) => {
+  console.log(
+    `⚠️ Lavalink closed [${name}] Code: ${code} Reason: ${reason || "Unknown"}`
+  );
+});
+
+kazagumo.shoukaku.on("disconnect", (name) => {
+  console.log(`🔌 Lavalink disconnected: ${name}`);
+});
+
+// Music events
+
+kazagumo.on("playerStart", (player, track) => {
+  const channel = client.channels.cache.get(player.textId);
+
+  if (channel) {
+    channel.send(
+      `🎵 **Now Playing:** ${track.title}`
+    );
+  }
+});
+
+kazagumo.on("playerEnd", (player) => {
+  console.log(`⏹️ Track ended in guild ${player.guildId}`);
+});
+
+kazagumo.on("playerEmpty", (player) => {
+  console.log(`📭 Queue empty in guild ${player.guildId}`);
+});
+
+// ================= COMMANDS =================
 
 client.commands = new Collection();
 
@@ -51,10 +134,14 @@ for (const file of commandFiles) {
   client.commands.set(command.data.name, command);
 }
 
+// ================= DISCORD READY =================
+
 client.once(Events.ClientReady, () => {
   console.log(`✅ ${client.user.tag} is online!`);
   console.log(`📦 Loaded ${client.commands.size} commands`);
 });
+
+// ================= INTERACTIONS =================
 
 client.on(Events.InteractionCreate, async interaction => {
   if (!interaction.isChatInputCommand()) return;
@@ -85,7 +172,16 @@ client.on(Events.InteractionCreate, async interaction => {
   }
 });
 
-// Slash commands register
+// ================= SLASH COMMAND REGISTER =================
+
 require("./deploy-commands");
 
+// ================= LOGIN =================
+
 client.login(process.env.TOKEN);
+
+// Export Kazagumo so commands can use it
+module.exports = {
+  client,
+  kazagumo
+};
